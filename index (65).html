@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>24000×12000 Board (24px Raster) + Schreiben</title>
+  <style>
+    :root {
+      --grid: 24px;
+      --bg: #ffffff;
+      --grid-color: rgba(0,0,0,0.08);
+      --grid-bold: rgba(0,0,0,0.12);
+      --shadow: 0 10px 30px rgba(0,0,0,0.12);
+      --ui: rgba(255,255,255,0.9);
+      --ui-border: rgba(0,0,0,0.10);
+      --text: #1a1a1a;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+      color: var(--text);
+      background: #f2f2f2;
+      user-select: none;
+    }
+
+    #viewport {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #eaeaea;
+      cursor: default;
+    }
+
+    #stage {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    #board {
+      position: relative;
+      width: 24000px;
+      height: 12000px;
+      background: var(--bg);
+      background-image:
+        repeating-linear-gradient(0deg,
+          var(--grid-color) 0,
+          var(--grid-color) 1px,
+          transparent 1px,
+          transparent var(--grid)
+        ),
+        repeating-linear-gradient(90deg,
+          var(--grid-color) 0,
+          var(--grid-color) 1px,
+          transparent 1px,
+          transparent var(--grid)
+        ),
+        repeating-linear-gradient(0deg,
+          var(--grid-bold) 0,
+          var(--grid-bold) 1px,
+          transparent 1px,
+          transparent calc(var(--grid) * 5)
+        ),
+        repeating-linear-gradient(90deg,
+          var(--grid-bold) 0,
+          var(--grid-bold) 1px,
+          transparent 1px,
+          transparent calc(var(--grid) * 5)
+        );
+      box-shadow: var(--shadow);
+    }
+
+    #dropHint {
+      position: absolute;
+      left: 24px;
+      top: 24px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.85);
+      border: 1px solid var(--ui-border);
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.35;
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+
+    #hud {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      padding: 10px 12px;
+      background: var(--ui);
+      border: 1px solid var(--ui-border);
+      border-radius: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      backdrop-filter: blur(8px);
+    }
+
+    #hud button {
+      border: 1px solid var(--ui-border);
+      background: white;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #hud button:active { transform: translateY(1px); }
+
+    #hud .meta {
+      font-size: 12px;
+      opacity: 0.8;
+      white-space: nowrap;
+    }
+
+    /* Dropped items */
+    .item {
+      position: absolute;
+      left: 0;
+      top: 0;
+      touch-action: none;
+      cursor: grab;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+      background: white;
+      border: 1px solid rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .item:active { cursor: grabbing; }
+
+    .item img { display: block; max-width: 100%; height: auto; }
+
+    .item .label {
+      padding: 8px 10px;
+      font-size: 12px;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      background: rgba(255,255,255,0.95);
+    }
+
+    /* Notes */
+    .note {
+      width: 420px;
+      min-height: 160px;
+      overflow: visible;
+    }
+
+    .note .note-body {
+      padding: 12px 12px 10px 12px;
+      font-size: 16px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      outline: none;
+      cursor: text;
+      user-select: text;
+      background: rgba(255,255,255,0.98);
+    }
+
+    .note .note-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      font-size: 12px;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      background: rgba(255,255,255,0.95);
+      cursor: grab;
+      user-select: none;
+    }
+
+    .note .note-footer .hint {
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+
+    .note.editing {
+      box-shadow: 0 14px 34px rgba(0,0,0,0.20);
+      border-color: rgba(0,0,0,0.18);
+    }
+
+    .panning #viewport { cursor: grabbing; }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <div id="stage">
+      <div id="board">
+        <div id="dropHint">
+          <strong>Board 24000×12000</strong><br/>
+          Raster: 24px<br/>
+          Zoom: Mausrad<br/>
+          Pan: rechte Maustaste ziehen <em>oder</em> Leertaste + ziehen<br/>
+          <strong>Text:</strong> Doppelklick → Notiz erstellen<br/>
+          Drop: Bilder/Dateien aus Explorer hier reinziehen
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hud">
+    <button id="reset">Reset View</button>
+    <button id="fit">Fit Board</button>
+    <button id="center">Center</button>
+    <div class="meta" id="meta">Zoom: 100% · X: 0 · Y: 0</div>
+  </div>
+
+  <script nonce="MTg4Nzg1NDY0MCwzMzA1MzMzNTYx">
+    const viewport = document.getElementById("viewport");
+    const stage = document.getElementById("stage");
+    const board = document.getElementById("board");
+    const meta = document.getElementById("meta");
+
+    let scale = 1;
+    let tx = 80;
+    let ty = 80;
+
+    const MIN_SCALE = 0.05;
+    const MAX_SCALE = 4;
+
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    function isPlainObject(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
+
+    function applyTransform() {
+      stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      meta.textContent = `Zoom: ${Math.round(scale * 100)}% · X: ${Math.round(tx)} · Y: ${Math.round(ty)}`;
+    }
+
+    function screenToWorld(screenX, screenY) {
+      return { x: (screenX - tx) / scale, y: (screenY - ty) / scale };
+    }
+
+    function worldToScreen(worldX, worldY) {
+      return { x: worldX * scale + tx, y: worldY * scale + ty };
+    }
+
+    // -----------------------------
+    // Zoom towards cursor
+    // -----------------------------
+    viewport.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      const before = screenToWorld(sx, sy);
+      const delta = -e.deltaY;
+      const zoomFactor = Math.exp(delta * 0.0015);
+      const nextScale = clamp(scale * zoomFactor, MIN_SCALE, MAX_SCALE);
+
+      scale = nextScale;
+      const after = worldToScreen(before.x, before.y);
+      tx += (sx - after.x);
+      ty += (sy - after.y);
+
+      applyTransform();
+    }, { passive: false });
+
+    // -----------------------------
+    // Panning (right mouse or space + left mouse)
+    // Disable when editing a note
+    // -----------------------------
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+    let camStart = { x: 0, y: 0 };
+    let spaceDown = false;
+
+    function isEditingTarget(target) {
+      return !!target?.closest?.(".note.editing");
+    }
+
+    window.addEventListener("keydown", (e) => { if (e.code === "Space") spaceDown = true; });
+    window.addEventListener("keyup", (e) => { if (e.code === "Space") spaceDown = false; });
+
+    viewport.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    viewport.addEventListener("pointerdown", (e) => {
+      if (isEditingTarget(e.target)) return;
+
+      const isRight = e.button === 2;
+      const panMode = isRight || (spaceDown && e.button === 0);
+      if (!panMode) return;
+
+      isPanning = true;
+      document.body.classList.add("panning");
+      viewport.setPointerCapture(e.pointerId);
+
+      panStart = { x: e.clientX, y: e.clientY };
+      camStart = { x: tx, y: ty };
+    });
+
+    viewport.addEventListener("pointermove", (e) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      tx = camStart.x + dx;
+      ty = camStart.y + dy;
+      applyTransform();
+    });
+
+    viewport.addEventListener("pointerup", (e) => {
+      if (!isPanning) return;
+      isPanning = false;
+      document.body.classList.remove("panning");
+      try { viewport.releasePointerCapture(e.pointerId); } catch {}
+    });
+
+    // -----------------------------
+    // Drop files/images -> place on board
+    // -----------------------------
+    viewport.addEventListener("dragover", (e) => e.preventDefault());
+
+    viewport.addEventListener("drop", async (e) => {
+      e.preventDefault();
+
+      const rect = viewport.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+
+      const files = [...(e.dataTransfer?.files || [])];
+      if (!files.length) return;
+
+      for (const file of files) {
+        if (file.type.startsWith("image/")) {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.src = url;
+          await img.decode().catch(() => null);
+
+          const maxW = 900;
+          const w = Math.min(img.naturalWidth || 600, maxW);
+          const h = (img.naturalHeight && img.naturalWidth)
+            ? Math.round((w * img.naturalHeight) / img.naturalWidth)
+            : 400;
+
+          const el = createItem({
+            x: world.x,
+            y: world.y,
+            w,
+            h,
+            content: img,
+            label: file.name
+          });
+
+          board.appendChild(el);
+        } else {
+          const el = createFileCard(world.x, world.y, file);
+          board.appendChild(el);
+        }
+      }
+    });
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function createFileCard(x, y, file) {
+      const wrap = document.createElement("div");
+      wrap.className = "item";
+      wrap.style.left = `${x}px`;
+      wrap.style.top = `${y}px`;
+      wrap.style.width = `360px`;
+
+      const inner = document.createElement("div");
+      inner.style.padding = "14px";
+      inner.style.fontSize = "14px";
+      inner.innerHTML = `<strong>Datei</strong><br>${escapeHtml(file.name)}<br><span style="opacity:.7;font-size:12px">${escapeHtml(file.type || "unknown")} · ${Math.round(file.size/1024)} KB</span>`;
+
+      const label = document.createElement("div");
+      label.className = "label";
+      label.textContent = "Ziehbar · (Nicht-Image als Karte abgelegt)";
+
+      wrap.appendChild(inner);
+      wrap.appendChild(label);
+
+      makeDraggable(wrap, { handleSelector: null });
+      return wrap;
+    }
+
+    function createItem({ x, y, w, h, content, label }) {
+      const wrap = document.createElement("div");
+      wrap.className = "item";
+      wrap.style.left = `${x}px`;
+      wrap.style.top = `${y}px`;
+      wrap.style.width = `${w}px`;
+
+      content.style.width = `${w}px`;
+      content.style.height = `${h}px`;
+      content.style.objectFit = "contain";
+      content.style.background = "white";
+
+      const cap = document.createElement("div");
+      cap.className = "label";
+      cap.textContent = label || "Item";
+
+      wrap.appendChild(content);
+      wrap.appendChild(cap);
+
+      makeDraggable(wrap, { handleSelector: null });
+      return wrap;
+    }
+
+    // -----------------------------
+    // Notes: double click -> create + edit
+    // -----------------------------
+    board.addEventListener("dblclick", (e) => {
+      // avoid creating note when dblclick on an existing item
+      if (e.target.closest(".item")) return;
+
+      const rect = viewport.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+
+      const note = createNote(world.x, world.y);
+      board.appendChild(note);
+      beginEdit(note);
+    });
+
+    function createNote(x, y) {
+      const wrap = document.createElement("div");
+      wrap.className = "item note";
+      wrap.style.left = `${x}px`;
+      wrap.style.top = `${y}px`;
+
+      const body = document.createElement("div");
+      body.className = "note-body";
+      body.contentEditable = "true";
+      body.spellcheck = false;
+      body.textContent = "Schreib hier…";
+
+      const footer = document.createElement("div");
+      footer.className = "note-footer";
+      footer.innerHTML = `<strong>Notiz</strong> <span class="hint">Drag: Footer · Edit: Klick</span>`;
+
+      wrap.appendChild(body);
+      wrap.appendChild(footer);
+
+      // Drag only via footer, so body is safe for typing/selection
+      makeDraggable(wrap, { handleSelector: ".note-footer" });
+
+      // click to edit
+      body.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
+      body.addEventListener("click", (e) => {
+        e.stopPropagation();
+        beginEdit(wrap);
+      });
+
+      // exit edit on blur (soft)
+      body.addEventListener("blur", () => endEdit(wrap));
+
+      // Ctrl+Enter ends editing
+      body.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          body.blur();
+        }
+      });
+
+      return wrap;
+    }
+
+    function beginEdit(noteEl) {
+      // end other notes
+      document.querySelectorAll(".note.editing").forEach(n => endEdit(n));
+      noteEl.classList.add("editing");
+
+      const body = noteEl.querySelector(".note-body");
+      if (!body) return;
+
+      // focus and place caret at end
+      body.focus();
+      placeCaretAtEnd(body);
+
+      // allow selection while editing
+      document.body.style.userSelect = "text";
+    }
+
+    function endEdit(noteEl) {
+      noteEl.classList.remove("editing");
+      document.body.style.userSelect = "none";
+    }
+
+    function placeCaretAtEnd(el) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    // click on empty board ends edit mode
+    board.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".note-body")) return;
+      document.querySelectorAll(".note.editing").forEach(n => endEdit(n));
+    });
+
+    // -----------------------------
+    // Internal dragging of items (world coords)
+    // -----------------------------
+    function makeDraggable(el, { handleSelector } = {}) {
+      let dragging = false;
+      let start = { x: 0, y: 0 };
+      let origin = { x: 0, y: 0 };
+
+      function isHandle(target) {
+        if (!handleSelector) return true;
+        return !!target.closest(handleSelector);
+      }
+
+      el.addEventListener("pointerdown", (e) => {
+        if (!isHandle(e.target)) return;
+        // do not drag when panning conditions are true
+        if (e.button === 2) return;
+        if (spaceDown && e.button === 0) return;
+
+        // If editing a note, allow dragging only via handle
+        if (el.classList.contains("note") && el.classList.contains("editing")) {
+          if (!isHandle(e.target)) return;
+        }
+
+        dragging = true;
+        el.setPointerCapture(e.pointerId);
+
+        const rect = viewport.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+
+        start = screenToWorld(sx, sy);
+        origin = {
+          x: parseFloat(el.style.left || "0"),
+          y: parseFloat(el.style.top || "0"),
+        };
+      });
+
+      el.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+
+        const rect = viewport.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+
+        const now = screenToWorld(sx, sy);
+        const dx = now.x - start.x;
+        const dy = now.y - start.y;
+
+        el.style.left = `${origin.x + dx}px`;
+        el.style.top = `${origin.y + dy}px`;
+      });
+
+      el.addEventListener("pointerup", (e) => {
+        if (!dragging) return;
+        dragging = false;
+        try { el.releasePointerCapture(e.pointerId); } catch {}
+      });
+    }
+
+    // -----------------------------
+    // HUD controls
+    // -----------------------------
+    document.getElementById("reset").addEventListener("click", () => {
+      scale = 1; tx = 80; ty = 80; applyTransform();
+    });
+
+    document.getElementById("center").addEventListener("click", () => {
+      const vw = viewport.clientWidth, vh = viewport.clientHeight;
+      const bw = board.clientWidth, bh = board.clientHeight;
+      tx = (vw - bw * scale) / 2;
+      ty = (vh - bh * scale) / 2;
+      applyTransform();
+    });
+
+    document.getElementById("fit").addEventListener("click", () => {
+      const vw = viewport.clientWidth, vh = viewport.clientHeight;
+      const bw = board.clientWidth, bh = board.clientHeight;
+      const s = Math.min(vw / bw, vh / bh);
+      scale = clamp(s, MIN_SCALE, MAX_SCALE);
+      tx = (vw - bw * scale) / 2;
+      ty = (vh - bh * scale) / 2;
+      applyTransform();
+    });
+
+    applyTransform();
+  </script>
+</body>
+</html>
